@@ -55,3 +55,37 @@ def test_early_exec_proc(
             raise CtrInitError("Systemd container failed to start") from e
         output = ctr.execute(["cat", f"/proc/{exec_proc_ctr_pid}/cgroup"])
         logger.debug("Got exec proc cgroups:\n%s", output)
+
+
+@pytest.mark.parametrize("cgroupns", ["host", "private"])
+def test_exec_proc_spam(
+    ctr_ctx: Callable[..., ContextManager[Container]],
+    delayed_systemd_image: CtrImage,
+    cgroupns: str,
+    cgroup_mode: str,
+):
+    with ctr_ctx(
+        delayed_systemd_image,
+        privileged=True,
+        cgroupns=cgroupns,
+        legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        wait=False,
+    ) as ctr:
+        end_time = time.time() + 2  # 2 seconds
+        while time.time() < end_time:
+            ctr.execute(["sleep", "inf"], detach=True)
+        # Wait for systemd boot to complete inside the container.
+        time.sleep(1)  # wait for the 1 sec sleep to finish
+        try:
+            ctr.execute(["systemctl", "is-system-running", "--wait"])
+        except CtrException as e:
+            logger.debug("Container boot logs:\n%s", ctr.logs())
+            raise CtrInitError("Systemd container failed to start") from e
+        exec_proc_ctr_pids = sorted(
+            int(p) for p in ctr.execute(["pidof", "sleep"]).split()
+        )
+        output = ctr.execute(["cat", f"/proc/1/cgroup"])
+        logger.debug("Got PID 1 cgroups:\n%s", output)
+        for pid in exec_proc_ctr_pids:
+            output = ctr.execute(["cat", f"/proc/{pid}/cgroup"])
+            logger.debug("Got exec proc %d cgroups:\n%s", pid, output)
