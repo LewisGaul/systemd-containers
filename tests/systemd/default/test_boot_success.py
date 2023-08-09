@@ -1,5 +1,5 @@
 import logging
-from typing import ContextManager
+from typing import Callable, ContextManager
 
 import pytest
 from python_on_whales import Container
@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.parametrize("cgroupns", ["host", "private"])
 def test_privileged(
-    ctr_client: CtrClient,
-    ctr_ctx: ContextManager[Container],
+    ctr_ctx: Callable[..., ContextManager[Container]],
     cgroupns: str,
     cgroup_mode: str,
 ):
@@ -21,14 +20,15 @@ def test_privileged(
         privileged=True,
         cgroupns=cgroupns,
         legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        log_boot_output=True,
     ) as ctr:
         pass
 
 
 @pytest.mark.parametrize("cgroupns", ["host", "private"])
 def test_privileged_systemd_mode(
+    ctr_ctx: Callable[..., ContextManager[Container]],
     ctr_client: CtrClient,
-    ctr_ctx: ContextManager[Container],
     cgroupns: str,
     cgroup_mode: str,
 ):
@@ -39,12 +39,14 @@ def test_privileged_systemd_mode(
         systemd=True,
         cgroupns=cgroupns,
         legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        log_boot_output=True,
     ) as ctr:
         pass
 
 
 def test_non_priv_with_host_cgroup_passthrough(
-    ctr_client: CtrClient, ctr_ctx: ContextManager[Container], cgroup_mode: str
+    ctr_ctx: Callable[..., ContextManager[Container]],
+    cgroup_mode: str,
 ):
     """
     Non-privileged systemd container passing through the host's cgroupfs.
@@ -67,14 +69,15 @@ def test_non_priv_with_host_cgroup_passthrough(
         volumes=[cgroup_vol],
         cgroupns="host",
         legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        log_boot_output=True,
     ) as ctr:
         pass
 
 
 @pytest.mark.parametrize("cgroupns", ["host", "private"])
 def test_non_priv_systemd_mode(
+    ctr_ctx: Callable[..., ContextManager[Container]],
     ctr_client: CtrClient,
-    ctr_ctx: ContextManager[Container],
     cgroupns: str,
     cgroup_mode: str,
 ):
@@ -89,5 +92,6 @@ def test_non_priv_systemd_mode(
         systemd=True,
         cgroupns=cgroupns,
         legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        log_boot_output=True,
     ) as ctr:
         pass

@@ -2,7 +2,7 @@ import contextlib
 import logging
 import textwrap
 import time
-from typing import ContextManager, Generator, Optional
+from typing import Callable, ContextManager, Generator, Optional
 
 import pytest
 from python_on_whales import Container
@@ -52,7 +52,7 @@ def systemd_image(ctr_client: CtrClient) -> CtrImage:
 @pytest.fixture
 def ctr_ctx(
     request: pytest.FixtureRequest, ctr_client: CtrClient, systemd_image: CtrImage
-) -> ContextManager[Container]:
+) -> Callable[..., ContextManager[Container]]:
     """Fixture providing a context manager for starting a systemd container."""
 
     @contextlib.contextmanager
@@ -61,6 +61,7 @@ def ctr_ctx(
         image: Optional[CtrImage] = None,
         systemd: Optional[bool] = None,
         legacy_cgroup_mode: bool = False,
+            log_boot_output: bool = False,
         **kwargs,
     ) -> Generator[Container, None, None]:
         """
@@ -77,6 +78,8 @@ def ctr_ctx(
             done for consistency with docker).
         :param legacy_cgroup_mode:
             Whether to force systemd to run in legacy cgroup mode.
+        :param log_boot_output:
+            Whether to always log boot output.
         :param args:
             Positional arguments passed through to Container.run().
         :param kwargs:
@@ -123,12 +126,15 @@ def ctr_ctx(
         # Run the container.
         ctr = ctr_client.run(image or systemd_image, *args, **kwargs)
         # Wait for systemd to start up inside the container.
+        error_occurred = False
         try:
             ctr.execute(["systemctl", "is-system-running", "--wait"])
         except CtrException as e:
+            error_occurred = True
             raise CtrInitError("Systemd container failed to start") from e
         finally:
-            logger.debug("Container boot logs:\n%s", ctr.logs())
+            if error_occurred or log_boot_output:
+                logger.debug("Container boot logs:\n%s", ctr.logs())
         # Yield the container, to automatically clean it up on exit.
         with ctr:
             yield ctr
