@@ -27,6 +27,10 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 @pytest.fixture(scope="package")
 def systemd_image(ctr_client: CtrClient) -> CtrImage:
+    # Note that systemd-resolved.service requires CAP_NET_RAW, which is not
+    # granted by podman by default. To avoid requiring this extra capability
+    # we simply mask the service - it's not clear whether it makes sense in a
+    # container anyway?
     dockerfile = textwrap.dedent(
         f"""\
         FROM ubuntu:20.04
@@ -112,6 +116,10 @@ def ctr_ctx(
         kwargs.setdefault("tty", True)
         if not kwargs.setdefault("detach", True):
             raise TypeError("Running container attached is not supported")
+        if kwargs.setdefault("remove", False):
+            raise TypeError(
+                "Removing container on exit breaks logging so is not supported"
+            )
         kwargs.setdefault("name", f"pow-tests-{time.time():.2f}")
         # Log container info.
         image_repr = image.repo_tags[0] if image.repo_tags else image.id[:8]
@@ -124,20 +132,22 @@ def ctr_ctx(
             image_repr,
             ", ".join(all_args_repr),
         )
-        # Run the container.
+        # Run the container, cleaning it up at the end.
         ctr = ctr_client.run(image or systemd_image, *args, **kwargs)
-        # Wait for systemd to start up inside the container.
-        error_occurred = False
         try:
-            ctr.execute(["systemctl", "is-system-running", "--wait"])
-        except CtrException as e:
-            error_occurred = True
-            raise CtrInitError("Systemd container failed to start") from e
-        finally:
-            if error_occurred or log_boot_output:
-                logger.debug("Container boot logs:\n%s", ctr.logs())
-        # Yield the container, to automatically clean it up on exit.
-        with ctr:
+            error_occurred = False
+            # Wait for systemd to start up inside the container.
+            try:
+                ctr.execute(["systemctl", "is-system-running", "--wait"])
+            except CtrException as e:
+                error_occurred = True
+                raise CtrInitError("Systemd container failed to start") from e
+            finally:
+                if error_occurred or log_boot_output:
+                    logger.debug("Container boot logs:\n%s", ctr.logs())
             yield ctr
+        finally:
+            with contextlib.suppress(CtrException):
+                ctr.remove(force=True)
 
     return ctr_ctx_mgr
