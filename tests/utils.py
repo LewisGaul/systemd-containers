@@ -6,6 +6,7 @@ __all__ = (
     "CtrMgr",
     "Mount",
     "build_with_dockerfile",
+    "get_enabled_cgroup_controllers",
     "run_cmd",
 )
 
@@ -19,7 +20,9 @@ from collections import namedtuple
 from pathlib import Path
 from typing import Iterable, Optional
 
+from python_on_whales import Container
 from python_on_whales import DockerClient as POWCtrClient
+from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
 
 
@@ -161,3 +164,31 @@ def build_with_dockerfile(
             build_root = tmpdir
         logger.debug("Building image using Dockerfile:\n%s", dockerfile.strip())
         return ctr_client.legacy_build(build_root, file=dockerfile_path, tags=tags)
+
+
+def get_enabled_cgroup_controllers(ctr: Container, cgroup_version: int) -> set[str]:
+    if cgroup_version == 1:
+        controllers = set()
+        cgroup_paths = ctr.execute(
+            ["find", "/sys/fs/cgroup", "-type", "d", "-name", "system.slice"]
+        ).splitlines()
+        return {p.removeprefix("/sys/fs/cgroup/").split("/")[0] for p in cgroup_paths}
+    else:
+        assert cgroup_version == 2
+        pid_1_cgroup_relpath = (
+            ctr.execute(["cat", "/proc/1/cgroup"]).split(":")[2].lstrip("/")
+        )
+        try:
+            ctr.execute(["ls", "/sys/fs/cgroup/" + pid_1_cgroup_relpath])
+        except CtrException:
+            *_, pid_1_cgroup_relpath = pid_1_cgroup_relpath.split("/", maxsplit=2)
+        return set(
+            ctr.execute(
+                [
+                    "cat",
+                    os.path.join(
+                        "/sys/fs/cgroup", pid_1_cgroup_relpath, "cgroup.controllers"
+                    ),
+                ]
+            ).split()
+        )
