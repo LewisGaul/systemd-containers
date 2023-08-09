@@ -44,7 +44,10 @@ def pytest_configure(config: pytest.Config) -> None:
     # Set 'cgroup_version' config value.
     try:
         output = ctr_client.run(
-            "busybox", ["stat", "-f", "/sys/fs/cgroup/", "-c", "%T"], detach=False, remove=True
+            "ubuntu:20.04",
+            ["stat", "-f", "/sys/fs/cgroup/", "-c", "%T"],
+            detach=False,
+            remove=True,
         )
     except CtrException as e:
         pytest.exit(f"Failed to run simple container to determine cgroup version:\n{e}")
@@ -52,13 +55,14 @@ def pytest_configure(config: pytest.Config) -> None:
         output = output.strip()
         if output == "tmpfs":
             config.option.cgroup_version = 1
-        elif output == "cgroup2":
+        elif output == "cgroup2fs":
             config.option.cgroup_version = 2
         else:
             pytest.exit(
                 "Unable to determine cgroup version from container's "
                 f"/sys/fs/cgroup filesystem type {output!r}"
             )
+        logger.info("Determined cgroup version %d", config.option.cgroup_version)
 
 
 # -----------------------------------------------------------------------------

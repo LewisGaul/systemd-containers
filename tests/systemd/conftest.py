@@ -33,6 +33,7 @@ def systemd_image(ctr_client: CtrClient) -> CtrImage:
         RUN apt-get update -y \\
             && apt-get install -y systemd \\
             && ln -s /lib/systemd/systemd /sbin/init \\
+            && systemctl mask systemd-resolved.service \\
             && systemctl set-default multi-user.target
         RUN echo 'root:root' | chpasswd
         STOPSIGNAL SIGRTMIN+3
@@ -61,7 +62,7 @@ def ctr_ctx(
         image: Optional[CtrImage] = None,
         systemd: Optional[bool] = None,
         legacy_cgroup_mode: bool = False,
-            log_boot_output: bool = False,
+        log_boot_output: bool = False,
         **kwargs,
     ) -> Generator[Container, None, None]:
         """
