@@ -2,7 +2,7 @@ import contextlib
 import logging
 import textwrap
 import time
-from typing import ContextManager, Generator
+from typing import ContextManager, Generator, Optional
 
 import pytest
 from python_on_whales import Container
@@ -10,7 +10,7 @@ from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
 
 from .. import utils
-from ..utils import CtrClient, CtrInitError
+from ..utils import CtrClient, CtrInitError, CtrMgr
 
 
 logger = logging.getLogger(__name__)
@@ -53,29 +53,83 @@ def systemd_image(ctr_client: CtrClient) -> CtrImage:
 def ctr_ctx(
     request: pytest.FixtureRequest, ctr_client: CtrClient, systemd_image: CtrImage
 ) -> ContextManager[Container]:
-    """Context manager for starting a systemd container."""
+    """Fixture providing a context manager for starting a systemd container."""
 
     @contextlib.contextmanager
-    def ctr_ctx_mgr(*args, **kwargs) -> Generator[Container, None, None]:
+    def ctr_ctx_mgr(
+        *args,
+        image: Optional[CtrImage] = None,
+        systemd: Optional[bool] = None,
+        legacy_cgroup_mode: bool = False,
+        **kwargs,
+    ) -> Generator[Container, None, None]:
+        """
+        A context manager for running a systemd container.
+
+        Sets some default argument values and waits for systemd to start up in
+        the container before yielding.
+
+        :param image:
+            Override the container image from the default systemd image.
+        :param systemd:
+            Whether to enable systemd mode. Defaults to systemd mode being off,
+            even for podman which normally defaults to it being on (this is
+            done for consistency with docker).
+        :param legacy_cgroup_mode:
+            Whether to force systemd to run in legacy cgroup mode.
+        :param args:
+            Positional arguments passed through to Container.run().
+        :param kwargs:
+            Keyword arguments passed through to Container.run().
+        :yield:
+            The Container object.
+        :raise CtrInitError:
+            If systemd in the container fails to start.
+        """
+        # Determine args to use for the container.
+        if image is None:
+            image = systemd_image
+        if systemd is None and ctr_client.mgr is CtrMgr.PODMAN:
+            # Disable podman's systemd mode by default for consistency
+            # when comparing with docker.
+            systemd = False
+        if systemd is not None:
+            kwargs["systemd"] = systemd
+        if ctr_client.mgr is CtrMgr.DOCKER:
+            # Docker does not set the 'container' env var, which systemd
+            # uses to determine it should run in container mode.
+            kwargs.setdefault("envs", {}).setdefault("container", "docker")
+        if legacy_cgroup_mode:
+            # Force systemd to run in legacy cgroup v1 mode.
+            assert request.config.option.cgroup_version == 1
+            kwargs.setdefault("envs", {})[
+                "SYSTEMD_PROC_CMDLINE"
+            ] = "systemd.legacy_systemd_cgroup_controller=1"
         kwargs.setdefault("tty", True)
         if not kwargs.setdefault("detach", True):
             raise TypeError("Running container attached is not supported")
         kwargs.setdefault("name", f"pow-tests-{time.time():.2f}")
+        # Log container info.
+        image_repr = image.repo_tags[0] if image.repo_tags else image.id[:8]
         all_args_repr = (
             *(str(x) for x in args),
             *(f"{k}={v}" for k, v in kwargs.items()),
         )
         logger.info(
-            "Running container with args: %s",
+            "Running container image %s with args: %s",
+            image_repr,
             ", ".join(all_args_repr),
         )
-        ctr = ctr_client.run(systemd_image, *args, **kwargs)
+        # Run the container.
+        ctr = ctr_client.run(image or systemd_image, *args, **kwargs)
+        # Wait for systemd to start up inside the container.
         try:
             ctr.execute(["systemctl", "is-system-running", "--wait"])
         except CtrException as e:
             raise CtrInitError("Systemd container failed to start") from e
         finally:
             logger.debug("Container boot logs:\n%s", ctr.logs())
+        # Yield the container, to automatically clean it up on exit.
         with ctr:
             yield ctr
 

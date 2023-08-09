@@ -4,6 +4,7 @@ __all__ = (
     "CtrClient",
     "CtrInitError",
     "CtrMgr",
+    "Mount",
     "build_with_dockerfile",
     "run_cmd",
 )
@@ -14,6 +15,7 @@ import os.path
 import shlex
 import subprocess
 import tempfile
+from collections import namedtuple
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -62,6 +64,9 @@ class CtrClient(POWCtrClient):
                 os.environ["DOCKER_HOST"] = host
 
         super().__init__(*args, client_call=[client_exe], **kwargs)
+
+
+Mount = namedtuple("Mount", "name, path, type, opts")
 
 
 def run_cmd(
