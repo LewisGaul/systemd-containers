@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Parameterise tests based on test function parameters."""
     if "cgroup_mode" in metafunc.fixturenames:
         if metafunc.config.option.cgroup_version == 1:
             metafunc.parametrize("cgroup_mode", ["legacy", "hybrid"])
@@ -48,10 +49,21 @@ def systemd_image(ctr_client: CtrClient) -> CtrImage:
         ctr_client, dockerfile, tags="ubuntu-systemd:20.04"
     )
     yield image
-    # logger.info(
-    #     "Cleaning up image %s (tags: %s)", image.id[:8], ", ".join(image.repo_tags)
-    # )
-    # image.remove(force=True, prune=True)
+
+
+@pytest.fixture(scope="package")
+def delayed_systemd_image(ctr_client: CtrClient, systemd_image: CtrImage) -> CtrImage:
+    """Systemd image that introduces a 1-second delay before starting."""
+    dockerfile = textwrap.dedent(
+        f"""\
+        FROM {systemd_image.repo_tags[0]}
+        ENTRYPOINT ["bash", "-c", "sleep 1 && exec /sbin/init"]
+        """
+    )
+    image = utils.build_with_dockerfile(
+        ctr_client, dockerfile, tags="ubuntu-systemd-delayed:20.04"
+    )
+    yield image
 
 
 @pytest.fixture
@@ -62,11 +74,12 @@ def ctr_ctx(
 
     @contextlib.contextmanager
     def ctr_ctx_mgr(
-        *args,
         image: Optional[CtrImage] = None,
+        *args,
         systemd: Optional[bool] = None,
         legacy_cgroup_mode: bool = False,
         log_boot_output: bool = False,
+        wait: bool = True,
         **kwargs,
     ) -> Generator[Container, None, None]:
         """
@@ -84,7 +97,9 @@ def ctr_ctx(
         :param legacy_cgroup_mode:
             Whether to force systemd to run in legacy cgroup mode.
         :param log_boot_output:
-            Whether to always log boot output.
+            Whether to always log boot output (if waiting on boot completion).
+        :param wait:
+            Whether to wait for boot to complete successfully.
         :param args:
             Positional arguments passed through to Container.run().
         :param kwargs:
@@ -135,16 +150,17 @@ def ctr_ctx(
         # Run the container, cleaning it up at the end.
         ctr = ctr_client.run(image or systemd_image, *args, **kwargs)
         try:
-            error_occurred = False
             # Wait for systemd to start up inside the container.
-            try:
-                ctr.execute(["systemctl", "is-system-running", "--wait"])
-            except CtrException as e:
-                error_occurred = True
-                raise CtrInitError("Systemd container failed to start") from e
-            finally:
-                if error_occurred or log_boot_output:
-                    logger.debug("Container boot logs:\n%s", ctr.logs())
+            if wait:
+                error_occurred = False
+                try:
+                    ctr.execute(["systemctl", "is-system-running", "--wait"])
+                except CtrException as e:
+                    error_occurred = True
+                    raise CtrInitError("Systemd container failed to start") from e
+                finally:
+                    if error_occurred or log_boot_output:
+                        logger.debug("Container boot logs:\n%s", ctr.logs())
             yield ctr
         finally:
             with contextlib.suppress(CtrException):
