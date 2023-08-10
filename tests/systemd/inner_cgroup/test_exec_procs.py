@@ -6,6 +6,7 @@ import pytest
 from pytest import FixtureRequest
 from python_on_whales import Container
 from python_on_whales import DockerException as CtrException
+from python_on_whales import Image as CtrImage
 
 from ... import utils
 from ...utils import CtrClient, CtrInitError, CtrMgr
@@ -57,7 +58,7 @@ def test_early_exec_proc(
 ):
     with ctr_ctx(
         entrypoint="bash",
-        command=["-c", "sleep 1 && exec /sbin/init"],
+        command=["-c", "sleep 1 && exec /init_script.sh"],
         **default_ctr_kwargs,
         wait=False,
     ) as ctr:
@@ -86,7 +87,7 @@ def test_exec_proc_spam(
 ):
     with ctr_ctx(
         entrypoint="bash",
-        command=["-c", "sleep 1 && exec /sbin/init"],
+        command=["-c", "sleep 1 && exec /init_script.sh"],
         **default_ctr_kwargs,
         wait=False,
     ) as ctr:

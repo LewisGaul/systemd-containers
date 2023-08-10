@@ -155,6 +155,7 @@ def build_with_dockerfile(
     *,
     tags: str | Iterable[str] = (),
     build_root: Path | None = None,
+    **kwargs,
 ) -> CtrImage:
     """Build a container image using a dockerfile in string form."""
     with tempfile.TemporaryDirectory(prefix="ctr-build-root-") as tmpdir:
@@ -163,7 +164,9 @@ def build_with_dockerfile(
         if not build_root:
             build_root = tmpdir
         logger.debug("Building image using Dockerfile:\n%s", dockerfile.strip())
-        return ctr_client.legacy_build(build_root, file=dockerfile_path, tags=tags)
+        return ctr_client.legacy_build(
+            build_root, file=dockerfile_path, tags=tags, **kwargs
+        )
 
 
 def get_enabled_cgroup_controllers(ctr: Container, cgroup_version: int) -> set[str]:
@@ -172,7 +175,9 @@ def get_enabled_cgroup_controllers(ctr: Container, cgroup_version: int) -> set[s
         cgroup_paths = ctr.execute(
             ["find", "/sys/fs/cgroup", "-type", "d", "-name", "system.slice"]
         ).splitlines()
-        return {p.removeprefix("/sys/fs/cgroup/").split("/")[0] for p in cgroup_paths}
+        return {
+            p.removeprefix("/sys/fs/cgroup/").split("/")[0] for p in cgroup_paths
+        } - {"systemd", "unified"}
     else:
         assert cgroup_version == 2
         pid_1_cgroup_relpath = (

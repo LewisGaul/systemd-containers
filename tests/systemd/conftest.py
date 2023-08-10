@@ -52,23 +52,14 @@ def systemd_image(ctr_client: CtrClient) -> CtrImage:
 
 
 @pytest.fixture(scope="package")
-def delayed_systemd_image(ctr_client: CtrClient, systemd_image: CtrImage) -> CtrImage:
-    """Systemd image that introduces a 1-second delay before starting."""
-    dockerfile = textwrap.dedent(
-        f"""\
-        FROM {systemd_image.repo_tags[0]}
-        ENTRYPOINT ["bash", "-c", "sleep 1 && exec /sbin/init"]
-        """
-    )
-    image = utils.build_with_dockerfile(
-        ctr_client, dockerfile, tags="ubuntu-systemd-delayed:20.04"
-    )
-    yield image
+def pkg_image(systemd_image: CtrClient) -> CtrImage:
+    """The default image for the package."""
+    return systemd_image
 
 
 @pytest.fixture
 def ctr_ctx(
-    request: pytest.FixtureRequest, ctr_client: CtrClient, systemd_image: CtrImage
+    request: pytest.FixtureRequest, ctr_client: CtrClient, pkg_image: CtrImage
 ) -> Callable[..., ContextManager[Container]]:
     """Fixture providing a context manager for starting a systemd container."""
 
@@ -111,7 +102,7 @@ def ctr_ctx(
         """
         # Determine args to use for the container.
         if image is None:
-            image = systemd_image
+            image = pkg_image
         if systemd is None and ctr_client.mgr is CtrMgr.PODMAN:
             # Disable podman's systemd mode by default for consistency
             # when comparing with docker.
