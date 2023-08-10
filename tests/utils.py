@@ -178,6 +178,9 @@ def get_enabled_cgroup_controllers(ctr: Container, cgroup_version: int) -> set[s
         pid_1_cgroup_relpath = (
             ctr.execute(["cat", "/proc/1/cgroup"]).split(":")[2].lstrip("/")
         )
+        # Workaround for the pseudo-private cgroup bind mounts used in
+        # cgroupns=host mode, finding the path that's actually visible inside
+        # the container.
         try:
             ctr.execute(["ls", "/sys/fs/cgroup/" + pid_1_cgroup_relpath])
         except CtrException:

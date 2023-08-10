@@ -87,7 +87,6 @@ def test_exec_proc_spam(
         while time.time() < end_time:
             ctr.execute(["sleep", "inf"], detach=True)
         # Wait for systemd boot to complete inside the container.
-        time.sleep(1)  # wait for the 1 sec sleep to finish
         try:
             ctr.execute(["systemctl", "is-system-running", "--wait"])
         except CtrException as e:
