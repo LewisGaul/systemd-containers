@@ -2,9 +2,10 @@ import contextlib
 import logging
 import textwrap
 import time
-from typing import Callable, ContextManager, Generator, Optional
+from typing import Any, Callable, ContextManager, Generator, Mapping, Optional
 
 import pytest
+from pytest import FixtureRequest
 from python_on_whales import Container
 from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
@@ -145,10 +146,25 @@ def ctr_ctx(
             if wait:
                 error_occurred = False
                 try:
-                    ctr.execute(["systemctl", "is-system-running", "--wait"])
-                except CtrException as e:
-                    error_occurred = True
-                    raise CtrInitError("Systemd container failed to start") from e
+                    try_until = time.time() + 5
+                    while True:
+                        try:
+                            ctr.execute(["systemctl", "is-system-running", "--wait"])
+                        except CtrException as e:
+                            if (
+                                e.stdout.strip() == "offline"
+                                or "Failed to connect to bus" in e.stderr
+                            ) and time.time() < try_until:
+                                # Systemd not yet started, may still be in a
+                                # pre-systemd init script, so retry.
+                                time.sleep(0.1)
+                                continue
+                            error_occurred = True
+                            raise CtrInitError(
+                                f"Systemd container failed to start: {e.stdout.strip()}"
+                            ) from e
+                        else:
+                            break
                 finally:
                     if error_occurred or log_boot_output:
                         logger.debug("Container boot logs:\n%s", ctr.logs())
@@ -158,3 +174,33 @@ def ctr_ctx(
                 ctr.remove(force=True)
 
     return ctr_ctx_mgr
+
+
+@pytest.fixture(params=["host", "private"])
+def cgroupns_param(request: FixtureRequest) -> str:
+    """Parameterise on cgroupns (host and private)."""
+    return request.param
+
+
+@pytest.fixture
+def default_ctr_kwargs(
+    ctr_client: CtrClient,
+    cgroupns_param: str,
+    cgroup_mode: str,
+) -> Mapping[str, Any]:
+    """
+    Default arguments for running a systemd container.
+
+    Automatically parameterises on cgroupns (host and private) and cgroup v1
+    mode (legacy and hybrid) if applicable.
+    """
+    kwargs = dict(
+        cgroupns=cgroupns_param,
+        legacy_cgroup_mode=(cgroup_mode == "legacy"),
+    )
+    if ctr_client.mgr is CtrMgr.PODMAN:
+        kwargs["systemd"] = "always"
+        kwargs["cap_add"] = ["sys_admin"]
+    else:
+        kwargs["privileged"] = True
+    return kwargs

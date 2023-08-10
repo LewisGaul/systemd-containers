@@ -10,26 +10,24 @@ from ...utils import CtrClient, CtrMgr
 logger = logging.getLogger(__name__)
 
 
-@pytest.mark.parametrize("cgroupns", ["host", "private"])
 def test_privileged(
     ctr_ctx: Callable[..., ContextManager[Container]],
-    cgroupns: str,
+    cgroupns_param: str,
     cgroup_mode: str,
 ):
     with ctr_ctx(
         privileged=True,
-        cgroupns=cgroupns,
+        cgroupns=cgroupns_param,
         legacy_cgroup_mode=(cgroup_mode == "legacy"),
         log_boot_output=True,
     ) as ctr:
         pass
 
 
-@pytest.mark.parametrize("cgroupns", ["host", "private"])
 def test_privileged_systemd_mode(
     ctr_ctx: Callable[..., ContextManager[Container]],
     ctr_client: CtrClient,
-    cgroupns: str,
+    cgroupns_param: str,
     cgroup_mode: str,
 ):
     if ctr_client.mgr is not CtrMgr.PODMAN:
@@ -37,7 +35,7 @@ def test_privileged_systemd_mode(
     with ctr_ctx(
         privileged=True,
         systemd=True,
-        cgroupns=cgroupns,
+        cgroupns=cgroupns_param,
         legacy_cgroup_mode=(cgroup_mode == "legacy"),
         log_boot_output=True,
     ) as ctr:
@@ -74,11 +72,10 @@ def test_non_priv_with_host_cgroup_passthrough(
         pass
 
 
-@pytest.mark.parametrize("cgroupns", ["host", "private"])
 def test_non_priv_systemd_mode(
     ctr_ctx: Callable[..., ContextManager[Container]],
     ctr_client: CtrClient,
-    cgroupns: str,
+    cgroupns_param: str,
     cgroup_mode: str,
 ):
     """
@@ -90,7 +87,7 @@ def test_non_priv_systemd_mode(
     with ctr_ctx(
         cap_add=["sys_admin"],
         systemd=True,
-        cgroupns=cgroupns,
+        cgroupns=cgroupns_param,
         legacy_cgroup_mode=(cgroup_mode == "legacy"),
         log_boot_output=True,
     ) as ctr:

@@ -2,39 +2,14 @@ import logging
 import time
 from typing import Any, Callable, ContextManager, Mapping
 
-import pytest
-from pytest import FixtureRequest
 from python_on_whales import Container
 from python_on_whales import DockerException as CtrException
 
 from ... import utils
-from ...utils import CtrClient, CtrInitError, CtrMgr
+from ...utils import CtrInitError
 
 
 logger = logging.getLogger(__name__)
-
-
-@pytest.fixture(params=["host", "private"])
-def cgroupns(request: FixtureRequest) -> str:
-    return request.param
-
-
-@pytest.fixture
-def default_ctr_kwargs(
-    ctr_client: CtrClient,
-    cgroupns: str,
-    cgroup_mode: str,
-) -> Mapping[str, Any]:
-    kwargs = dict(
-        cgroupns=cgroupns,
-        legacy_cgroup_mode=(cgroup_mode == "legacy"),
-    )
-    if ctr_client.mgr is CtrMgr.PODMAN:
-        kwargs["systemd"] = "always"
-        kwargs["cap_add"] = ["sys_admin"]
-    else:
-        kwargs["privileged"] = True
-    return kwargs
 
 
 def test_late_exec_proc(
