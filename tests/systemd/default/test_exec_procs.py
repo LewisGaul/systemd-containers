@@ -1,31 +1,49 @@
 import logging
 import time
-from typing import Callable, ContextManager
+from typing import Any, Callable, ContextManager, Mapping
 
 import pytest
+from pytest import FixtureRequest
 from python_on_whales import Container
 from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
 
 from ... import utils
-from ...utils import CtrInitError
+from ...utils import CtrClient, CtrInitError, CtrMgr
 
 
 logger = logging.getLogger(__name__)
 
 
-@pytest.mark.parametrize("cgroupns", ["host", "private"])
-def test_late_exec_proc(
-    ctr_ctx: Callable[..., ContextManager[Container]],
+@pytest.fixture(params=["host", "private"])
+def cgroupns(request: FixtureRequest) -> str:
+    return request.param
+
+
+@pytest.fixture
+def default_ctr_kwargs(
+    ctr_client: CtrClient,
     cgroupns: str,
     cgroup_mode: str,
-    cgroup_version: int,
-):
-    with ctr_ctx(
-        privileged=True,
+) -> Mapping[str, Any]:
+    kwargs = dict(
         cgroupns=cgroupns,
         legacy_cgroup_mode=(cgroup_mode == "legacy"),
-    ) as ctr:
+    )
+    if ctr_client.mgr is CtrMgr.PODMAN:
+        kwargs["systemd"] = "always"
+        kwargs["cap_add"] = ["sys_admin"]
+    else:
+        kwargs["privileged"] = True
+    return kwargs
+
+
+def test_late_exec_proc(
+    ctr_ctx: Callable[..., ContextManager[Container]],
+    default_ctr_kwargs: Mapping[str, Any],
+    cgroup_version: int,
+):
+    with ctr_ctx(**default_ctr_kwargs) as ctr:
         output = ctr.execute(["cat", "/proc/self/cgroup"])
         logger.debug("Got exec proc cgroups:\n%s", output)
         enabled_controllers = utils.get_enabled_cgroup_controllers(ctr, cgroup_version)
@@ -33,19 +51,15 @@ def test_late_exec_proc(
         assert enabled_controllers >= {"memory", "pids"}
 
 
-@pytest.mark.parametrize("cgroupns", ["host", "private"])
 def test_early_exec_proc(
     ctr_ctx: Callable[..., ContextManager[Container]],
     delayed_systemd_image: CtrImage,
-    cgroupns: str,
-    cgroup_mode: str,
+    default_ctr_kwargs: Mapping[str, Any],
     cgroup_version: int,
 ):
     with ctr_ctx(
         delayed_systemd_image,
-        privileged=True,
-        cgroupns=cgroupns,
-        legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        **default_ctr_kwargs,
         wait=False,
     ) as ctr:
         ctr.execute(["sleep", "inf"], detach=True)
@@ -66,19 +80,15 @@ def test_early_exec_proc(
         assert enabled_controllers >= {"memory", "pids"}
 
 
-@pytest.mark.parametrize("cgroupns", ["host", "private"])
 def test_exec_proc_spam(
     ctr_ctx: Callable[..., ContextManager[Container]],
     delayed_systemd_image: CtrImage,
-    cgroupns: str,
-    cgroup_mode: str,
+    default_ctr_kwargs: Mapping[str, Any],
     cgroup_version: int,
 ):
     with ctr_ctx(
         delayed_systemd_image,
-        privileged=True,
-        cgroupns=cgroupns,
-        legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        **default_ctr_kwargs,
         wait=False,
     ) as ctr:
         # Spam creating sleeping exec processes for 2 seconds - 1 second before
