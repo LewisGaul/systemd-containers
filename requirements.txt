@@ -10,7 +10,7 @@ packaging==23.1
 pluggy==1.2.0
 pydantic==1.10.10
 pytest==7.4.0
-python-on-whales @ git+https://github.com/LewisGaul/python-on-whales.git@systemd-arg
+python-on-whales @ git+https://github.com/gabrieldemarmiesse/python-on-whales.git@master
 requests==2.31.0
 tomli==2.0.1
 tqdm==4.65.0
