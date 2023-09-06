@@ -81,13 +81,32 @@ def _warn_unexpected_boot_logs(ctr_logs: str) -> None:
 
 def test_privileged(ctr_ctx: CtrCtxType, ctr_mgr: CtrMgr):
     """Test running the container in privileged mode."""
+    envs = {}
     if ctr_mgr is CtrMgr.DOCKER:
         # Docker does not set the 'container' env var, which systemd
         # uses to determine it should run in container mode. Maybe not strictly
         # needed.
-        envs = dict(container="docker")
+        envs["container"] = "docker"
     with ctr_ctx(
         privileged=True,
+        envs=envs,
+        log_boot_output=True,
+    ) as ctr:
+        _warn_unexpected_boot_logs(ctr.logs())
+
+
+@pytest.mark.setup_mode(["remount", "unmount"])
+def test_non_priv(ctr_ctx: CtrCtxType, ctr_mgr: CtrMgr):
+    """Test running in non-privileged mode, requiring custom setup."""
+    envs = {}
+    if ctr_mgr is CtrMgr.DOCKER:
+        # Docker does not set the 'container' env var, which systemd
+        # uses to determine it should run in container mode. Maybe not strictly
+        # needed.
+        envs["container"] = "docker"
+    with ctr_ctx(
+        cap_add=["sys_admin"],
+        systemd=False,
         envs=envs,
         log_boot_output=True,
     ) as ctr:
@@ -111,10 +130,12 @@ def test_non_priv_with_host_cgroup_passthrough(
     3. Ensure /run is a tmpfs
     4. Set the 'container' env var to something (value not that important)
     """
+    envs = {}
     if ctr_mgr is CtrMgr.DOCKER:
         # Docker does not set the 'container' env var, which systemd
-        # uses to determine it should run in container mode.
-        envs = dict(container="docker")
+        # uses to determine it should run in container mode. Maybe not strictly
+        # needed.
+        envs["container"] = "docker"
     if cgroup_version == 1:
         # The tmpfs mount doesn't need to be writable on cgroups v1.
         cgroup_vol = ("/sys/fs/cgroup", "/sys/fs/cgroup", "ro")

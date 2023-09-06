@@ -40,12 +40,13 @@ elif [[ $cgroup_mount_type == cgroup2fs ]]; then
     # Make sure to handle cgroupns=host, where no bind mount is used to act as
     # a pseudo-private cgroup namespace under cgroups v2.
     ctr_cgroup_dir=$(grep "::/" /proc/1/cgroup | cut -d ':' -f 3)
+    controllers=( $(cat "/sys/fs/cgroup$ctr_cgroup_dir/cgroup.controllers") )
     log "Creating /sys/fs/cgroup$ctr_cgroup_dir/custom/ and moving PID 1"
     mkdir "/sys/fs/cgroup$ctr_cgroup_dir/custom/"
     # PID 1 must be the only process running in the container.
     echo 1 > "/sys/fs/cgroup$ctr_cgroup_dir/custom/cgroup.procs"
-    log "Activating memory cgroup controller"
-    echo +memory > "/sys/fs/cgroup$ctr_cgroup_dir/cgroup.subtree_control"
+    log "Activating controllers: ${controllers[*]}"
+    echo "${controllers[*]/#/+}" > "/sys/fs/cgroup$ctr_cgroup_dir/cgroup.subtree_control"
 else
     log_stderr "ERROR: Unable to detect cgroup version using /sys/fs/cgroup mount"
     exit 1

@@ -197,25 +197,35 @@ def cgroup_mode(request: FixtureRequest) -> str:
 
 
 @pytest.fixture
-def default_ctr_kwargs(ctr_mgr: CtrMgr) -> dict[str, Any]:
+def default_ctr_kwargs(ctr_mgr: CtrMgr, setup_mode: Optional[str]) -> dict[str, Any]:
     """
-    Default arguments for running a systemd container, accommodating both
-    Docker and Podman.
+    Default, minimal arguments required for a systemd container to run.
+
+    This accommodates both Docker and Podman, and takes into account the setup
+    mode being used, hence documenting the different requirements imposed by
+    these modes.
     """
     kwargs = {}
     if ctr_mgr is CtrMgr.PODMAN:
-        kwargs["cap_add"] = ["sys_admin"]
+        # Enable Podman's systemd mode as a sensible default.
         # This only needs to be "always" rather than True (the Podman default)
         # for the case we're using a custom entrypoint, and True could be used
         # if we were to package that entrypoint to a path that Podman recognises
-        # as a systemd entrypoint, such as /usr/sbin/init. Might as well just
-        # use "always" here to be explicit anyway.
+        # as a systemd entrypoint, such as /usr/sbin/init. But we might as well
+        # just use "always" here to be explicit about the intent.
         kwargs["systemd"] = "always"
     else:
-        kwargs["privileged"] = True
         # Docker does not set the 'container' env var, which systemd
         # uses to determine it should run in container mode.
         kwargs.setdefault("envs", {}).setdefault("container", "docker")
+
+    # Privileged mode is required when running with Docker, unless certain
+    # custom setup is performed. Otherwise, CAP_SYS_ADMIN is sufficient.
+    if ctr_mgr is CtrMgr.DOCKER and setup_mode not in ["remount", "unmount"]:
+        kwargs["privileged"] = True
+    else:
+        kwargs["cap_add"] = ["sys_admin"]
+
     return kwargs
 
 
@@ -278,6 +288,10 @@ def ctr_ctx(
             # Disable podman's systemd mode by default for consistency when
             # comparing with docker.
             systemd = False
+        elif systemd is False and ctr_client.mgr is CtrMgr.DOCKER:
+            # Docker doesn't have systemd mode, so no need to pass the arg for
+            # it to be 'False'.
+            systemd = None
         elif systemd is not None:
             if ctr_client.mgr is CtrMgr.DOCKER:
                 pytest.skip("Systemd mode not supported by Docker")
@@ -289,7 +303,7 @@ def ctr_ctx(
                 "SYSTEMD_PROC_CMDLINE"
             ] = "systemd.legacy_systemd_cgroup_controller=1"
         kwargs.setdefault("tty", True)
-        kwargs.setdefault("interactive", True)
+        kwargs.setdefault("interactive", True)  # not needed, helps debugging
         if not kwargs.setdefault("detach", True):
             raise TypeError("Running container attached is not supported")
         if kwargs.setdefault("remove", False):
@@ -308,7 +322,7 @@ def ctr_ctx(
             *(str(x) for x in args),
             *(f"{k}={v}" for k, v in kwargs.items()),
         )
-        logger.debug(
+        logger.info(
             "Running container image %s with args: %s",
             image_repr,
             ", ".join(all_args_repr),
