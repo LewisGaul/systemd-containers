@@ -23,10 +23,8 @@ if [[ $cgroup_mount_type == tmpfs ]]; then
     umount -R /sys/fs/cgroup
 elif [[ $cgroup_mount_type == cgroup2fs ]]; then
     log "Detected cgroups v2"
-    if ! findmnt /sys/fs/cgroup -O rw > /dev/null; then
-        log "Remounting /sys/fs/cgroup as read-write"
-        mount /sys/fs/cgroup -o remount,rw
-    fi
+    log "Unmounting /sys/fs/cgroup mount (allow systemd to recreate)"
+    umount /sys/fs/cgroup
 else
     log_stderr "ERROR: Unable to detect cgroup version using /sys/fs/cgroup mount"
     exit 1

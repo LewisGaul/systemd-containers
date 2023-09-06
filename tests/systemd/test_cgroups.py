@@ -1,16 +1,14 @@
 import logging
-from typing import Any, Callable, ContextManager, Mapping
+from typing import Any, Mapping
 
-from python_on_whales import Container
-
-from ... import utils
-
+from .. import utils
+from . import CtrCtxType
 
 logger = logging.getLogger(__name__)
 
 
 def test_cgroup_mounts(
-    ctr_ctx: Callable[..., ContextManager[Container]],
+    ctr_ctx: CtrCtxType,
     default_ctr_kwargs: Mapping[str, Any],
 ):
     with ctr_ctx(**default_ctr_kwargs) as ctr:
@@ -19,7 +17,7 @@ def test_cgroup_mounts(
 
 
 def test_cgroup_paths(
-    ctr_ctx: Callable[..., ContextManager[Container]],
+    ctr_ctx: CtrCtxType,
     default_ctr_kwargs: Mapping[str, Any],
 ):
     with ctr_ctx(**default_ctr_kwargs) as ctr:
@@ -33,7 +31,7 @@ def test_cgroup_paths(
 
 
 def test_cgroup_controllers(
-    ctr_ctx: Callable[..., ContextManager[Container]],
+    ctr_ctx: CtrCtxType,
     default_ctr_kwargs: Mapping[str, Any],
     cgroup_version: int,
 ):

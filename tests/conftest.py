@@ -6,8 +6,7 @@ import pytest
 from python_on_whales import DockerException as CtrException
 
 from . import utils
-from .utils import CtrClient
-
+from .utils import CtrClient, CtrMgr
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +73,12 @@ def pytest_configure(config: pytest.Config) -> None:
 def ctr_client(pytestconfig: pytest.Config) -> CtrClient:
     """A container client for performing container operations."""
     return pytestconfig.option.ctr_client
+
+
+@pytest.fixture(scope="session")
+def ctr_mgr(ctr_client: CtrClient) -> CtrMgr:
+    """The container manager in use."""
+    return ctr_client.mgr
 
 
 @pytest.fixture(scope="session")

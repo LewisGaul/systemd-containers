@@ -1,50 +1,41 @@
 import logging
-from typing import Callable, ContextManager
 
 import pytest
-from python_on_whales import Container
 
-from ...utils import CtrClient, CtrMgr
-
+from ..utils import CtrMgr
+from . import CtrCtxType
 
 logger = logging.getLogger(__name__)
 
 
-def test_privileged(
-    ctr_ctx: Callable[..., ContextManager[Container]],
-    cgroupns_param: str,
-    cgroup_mode: str,
-):
+def test_privileged(ctr_ctx: CtrCtxType, ctr_mgr: CtrMgr):
+    if ctr_mgr is CtrMgr.DOCKER:
+        # Docker does not set the 'container' env var, which systemd
+        # uses to determine it should run in container mode.
+        envs = dict(container="docker")
     with ctr_ctx(
         privileged=True,
-        cgroupns=cgroupns_param,
-        legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        envs=envs,
         log_boot_output=True,
     ) as ctr:
         pass
 
 
-def test_privileged_systemd_mode(
-    ctr_ctx: Callable[..., ContextManager[Container]],
-    ctr_client: CtrClient,
-    cgroupns_param: str,
-    cgroup_mode: str,
-):
-    if ctr_client.mgr is not CtrMgr.PODMAN:
-        pytest.skip("Systemd mode only supported by Podman")
+def test_privileged_systemd_mode(ctr_ctx: CtrCtxType):
     with ctr_ctx(
         privileged=True,
         systemd=True,
-        cgroupns=cgroupns_param,
-        legacy_cgroup_mode=(cgroup_mode == "legacy"),
         log_boot_output=True,
     ) as ctr:
         pass
 
 
+@pytest.mark.setup_mode([None])
+@pytest.mark.cgroupns(["host"])
 def test_non_priv_with_host_cgroup_passthrough(
-    ctr_ctx: Callable[..., ContextManager[Container]],
-    cgroup_mode: str,
+    ctr_ctx: CtrCtxType,
+    ctr_mgr: CtrMgr,
+    cgroup_version: int,
 ):
     """
     Non-privileged systemd container passing through the host's cgroupfs.
@@ -56,39 +47,36 @@ def test_non_priv_with_host_cgroup_passthrough(
     3. Ensure /run is a tmpfs
     4. Set the 'container' env var to something (value not that important)
     """
-    if cgroup_mode == "unified":
-        cgroup_vol = ("/sys/fs/cgroup", "/sys/fs/cgroup", "rw")
-    else:
+    if ctr_mgr is CtrMgr.DOCKER:
+        # Docker does not set the 'container' env var, which systemd
+        # uses to determine it should run in container mode.
+        envs = dict(container="docker")
+    if cgroup_version == 1:
+        # The tmpfs mount doesn't need to be writable on cgroups v1.
         cgroup_vol = ("/sys/fs/cgroup", "/sys/fs/cgroup", "ro")
+    else:
+        # The cgroup2 mount does need to be writable on cgroups v2.
+        cgroup_vol = ("/sys/fs/cgroup", "/sys/fs/cgroup", "rw")
 
     with ctr_ctx(
         cap_add=["sys_admin"],
         tmpfs=["/run"],
         volumes=[cgroup_vol],
         cgroupns="host",
-        legacy_cgroup_mode=(cgroup_mode == "legacy"),
+        envs=envs,
         log_boot_output=True,
     ) as ctr:
         pass
 
 
-def test_non_priv_systemd_mode(
-    ctr_ctx: Callable[..., ContextManager[Container]],
-    ctr_client: CtrClient,
-    cgroupns_param: str,
-    cgroup_mode: str,
-):
+def test_non_priv_systemd_mode(ctr_ctx: CtrCtxType):
     """
     Test running with Podman's systemd mode, which automatically sets up the
     container for running systemd in non-privileged.
     """
-    if ctr_client.mgr is not CtrMgr.PODMAN:
-        pytest.skip("Systemd mode only supported by Podman")
     with ctr_ctx(
         cap_add=["sys_admin"],
         systemd=True,
-        cgroupns=cgroupns_param,
-        legacy_cgroup_mode=(cgroup_mode == "legacy"),
         log_boot_output=True,
     ) as ctr:
         pass

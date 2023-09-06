@@ -1,30 +1,86 @@
+from __future__ import annotations
+
 import contextlib
 import logging
 import textwrap
 import time
-from typing import Any, Callable, ContextManager, Generator, Mapping, Optional
+from pathlib import Path
+from typing import Any, Generator, Mapping, Optional
 
 import pytest
-from pytest import FixtureRequest
+from pytest import Config, FixtureRequest, Item
 from python_on_whales import Container
 from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
 
 from .. import utils
-from ..utils import CtrClient, CtrInitError, CtrMgr
-
+from ..utils import CtrClient, CtrInitError, CtrMgr, Mount
+from . import SYSTEMD_TEST_DIR, CtrCtxType
 
 logger = logging.getLogger(__name__)
 
+_PARAMETERISATIONS = ["setup_mode", "cgroupns", "cgroup_mode"]
 
-def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """Parameterise tests based on test function parameters."""
-    if "cgroup_mode" in metafunc.fixturenames:
-        if metafunc.config.option.cgroup_version == 1:
-            metafunc.parametrize("cgroup_mode", ["legacy", "hybrid"])
+
+# -----------------------------------------------------------------------------
+# Hooks
+# -----------------------------------------------------------------------------
+
+
+def pytest_configure(config: Config) -> None:
+    for param in _PARAMETERISATIONS:
+        config.addinivalue_line(
+            "markers",
+            f"{param}([...]): Values for the given parameter to use in the test",
+        )
+    config.addinivalue_line(
+        "markers",
+        f'ctr_mgr(MGR, reason="..."): Container manager required by the test',
+    )
+
+
+def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
+    cgroup_version: int = config.option.cgroup_version
+
+    # Find paramaterisations that don't make sense and remove them from
+    # the list of tests to be run.
+    remove = []
+    for item in items:
+        if not isinstance(item, pytest.Function):
+            # Not sure when this would be the case?
+            continue
+        test_params: Mapping[str, Any] = item.callspec.params
+        valid_conditions = {}
+        if cgroup_version == 1:
+            valid_conditions["cgroupv1 non-unified"] = (
+                test_params["cgroup_mode"] != "unified"
+            )
         else:
-            assert metafunc.config.option.cgroup_version == 2
-            metafunc.parametrize("cgroup_mode", ["unified"])
+            valid_conditions["cgroupv2 unified"] = (
+                test_params["cgroup_mode"] == "unified"
+            )
+        for param in ["setup_mode", "cgroupns", "cgroup_mode"]:
+            marker = item.get_closest_marker(param)
+            if marker:
+                valid_conditions[param] = test_params[param] in marker.args[0]
+        if not all(valid_conditions.values()):
+            remove.append(item)
+
+    logger.debug("Removing %u test parameterisations that don't apply", len(remove))
+    items[:] = [x for x in items if x not in remove]
+
+    # Mark tests that cannot be executed to be skipped.
+    for items in items:
+        if ctr_mgr_marker := item.get_closest_marker("ctr_mgr"):
+            required_ctr_mgr = ctr_mgr_marker.args[0]
+            skip_reason = ctr_mgr_marker.kwargs.get("reason")
+            if config.option.ctr_client.mgr is not required_ctr_mgr:
+                item.add_marker(pytest.mark.skip(skip_reason))
+
+
+# -----------------------------------------------------------------------------
+# Fixtures
+# -----------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="package")
@@ -52,24 +108,134 @@ def systemd_image(ctr_client: CtrClient) -> CtrImage:
     yield image
 
 
+@pytest.fixture(
+    scope="package",
+    params=[None, "unmount", "inner_cgroup"],
+    ids=["default", "unmount", "inner_cgroup"],
+)
+def setup_mode(request: FixtureRequest) -> None:
+    """
+    The container setup mode, parameterising all tests at a package level.
+    """
+    logger.info("Running tests in setup mode: %s", request.param)
+    if request.param is not None:
+        # Check the directory for the setup mode exists.
+        # TODO: Automatically find setup modes from dirs that exist.
+        setup_mode_dir = SYSTEMD_TEST_DIR / "setup_modes" / request.param
+        assert setup_mode_dir.is_dir()
+        assert (setup_mode_dir / "init_script.sh").is_file()
+    return request.param
+
+
 @pytest.fixture(scope="package")
-def pkg_image(systemd_image: CtrClient) -> CtrImage:
-    """The default image for the package."""
-    return systemd_image
+def pkg_image(
+    ctr_client: CtrClient,
+    systemd_image: CtrClient,
+    setup_mode: Optional[str],
+) -> CtrImage:
+    """The image to use for the parameterised setup mode."""
+    if setup_mode is None:
+        return systemd_image
+
+    dockerfile = textwrap.dedent(
+        f"""\
+        FROM {systemd_image.repo_tags[0]}
+        COPY init_script.sh /init_script.sh
+        ENTRYPOINT ["/init_script.sh"]
+        """
+    )
+    image = utils.build_with_dockerfile(
+        ctr_client,
+        dockerfile,
+        build_root=SYSTEMD_TEST_DIR / "setup_modes" / setup_mode,
+        tags=f"ubuntu-systemd-{setup_mode}:20.04",
+    )
+    return image
+
+
+@pytest.fixture(scope="package", autouse=True)
+def host_check_systemd(
+    cgroup_version: int,
+    ctr_client: CtrClient,
+    setup_mode: Optional[str],
+) -> None:
+    """
+    Check properties of the container host for running systemd containers.
+    """
+    # Check /sys/fs/cgroup/systemd exists if host is on cgroups v1.
+    if cgroup_version == 1:
+        mounts = [
+            Mount(*L.split()[:4]) for L in Path("/proc/mounts").read_text().splitlines()
+        ]
+        if ("/sys/fs/cgroup/systemd", "cgroup") not in [
+            (m.path, m.type) for m in mounts
+        ] and setup_mode is None:
+            pytest.fail(
+                "Default systemd containers cannot run on a cgroup v1 host that "
+                "doesn't have /sys/fs/cgroup/systemd mounted"
+            )
+
+
+@pytest.fixture(params=["host", "private"])
+def cgroupns(request: FixtureRequest) -> str:
+    """Parameterise on cgroupns (host and private)."""
+    return request.param
+
+
+@pytest.fixture(params=["legacy", "hybrid", "unified"])
+def cgroup_mode(request: FixtureRequest) -> str:
+    """Parameterise on systemd cgroup mode."""
+    if request.config.option.cgroup_version == 1 and request.param == "unified":
+        pytest.skip("Host uses cgroups v1")
+    elif request.config.option.cgroup_version == 2 and request.param != "unified":
+        pytest.skip("Host uses cgroups v2")
+    return request.param
+
+
+@pytest.fixture
+def default_ctr_kwargs(ctr_mgr: CtrMgr) -> Mapping[str, Any]:
+    """
+    Default arguments for running a systemd container, accommodating both
+    Docker and Podman.
+    """
+    kwargs = {}
+    if ctr_mgr is CtrMgr.PODMAN:
+        kwargs["cap_add"] = ["sys_admin"]
+        # This is only needed for the case we're using a custom entrypoint, and
+        # could be avoided if we were to package that entrypoint to a path that
+        # Podman recognises as a systemd entrypoint, such as /usr/sbin/init.
+        kwargs["systemd"] = "always"
+    else:
+        kwargs["privileged"] = True
+        # Docker does not set the 'container' env var, which systemd
+        # uses to determine it should run in container mode.
+        kwargs.setdefault("envs", {}).setdefault("container", "docker")
+    return kwargs
 
 
 @pytest.fixture
 def ctr_ctx(
-    request: pytest.FixtureRequest, ctr_client: CtrClient, pkg_image: CtrImage
-) -> Callable[..., ContextManager[Container]]:
-    """Fixture providing a context manager for starting a systemd container."""
+    request: pytest.FixtureRequest,
+    ctr_client: CtrClient,
+    pkg_image: CtrImage,
+    cgroupns: str,
+    cgroup_mode: str,
+) -> CtrCtxType:
+    """
+    Fixture providing a context manager for starting a systemd container.
+
+    This is expected to be used by all tests, and automatically parameterises
+    on the following:
+     - setup_mode
+     - cgroupns
+     - cgroup_mode
+    """
 
     @contextlib.contextmanager
     def ctr_ctx_mgr(
         image: Optional[CtrImage] = None,
         *args,
         systemd: Optional[bool] = None,
-        legacy_cgroup_mode: bool = False,
         log_boot_output: bool = False,
         wait: bool = True,
         **kwargs,
@@ -86,8 +252,6 @@ def ctr_ctx(
             Whether to enable systemd mode. Defaults to systemd mode being off,
             even for podman which normally defaults to it being on (this is
             done for consistency with docker).
-        :param legacy_cgroup_mode:
-            Whether to force systemd to run in legacy cgroup mode.
         :param log_boot_output:
             Whether to always log boot output (if waiting on boot completion).
         :param wait:
@@ -105,16 +269,14 @@ def ctr_ctx(
         if image is None:
             image = pkg_image
         if systemd is None and ctr_client.mgr is CtrMgr.PODMAN:
-            # Disable podman's systemd mode by default for consistency
-            # when comparing with docker.
+            # Disable podman's systemd mode by default for consistency when
+            # comparing with docker.
             systemd = False
-        if systemd is not None:
+        elif systemd is not None:
+            if ctr_client.mgr is CtrMgr.DOCKER:
+                pytest.skip("Systemd mode not supported by Docker")
             kwargs["systemd"] = systemd
-        if ctr_client.mgr is CtrMgr.DOCKER:
-            # Docker does not set the 'container' env var, which systemd
-            # uses to determine it should run in container mode.
-            kwargs.setdefault("envs", {}).setdefault("container", "docker")
-        if legacy_cgroup_mode:
+        if cgroup_mode == "legacy":
             # Force systemd to run in legacy cgroup v1 mode.
             assert request.config.option.cgroup_version == 1
             kwargs.setdefault("envs", {})[
@@ -127,14 +289,19 @@ def ctr_ctx(
             raise TypeError(
                 "Removing container on exit breaks logging so is not supported"
             )
-        kwargs.setdefault("name", f"pow-tests-{time.time():.2f}")
+        if kwargs.setdefault("cgroupns", cgroupns) != cgroupns:
+            raise TypeError(
+                "Cgroup namespace mode is parameterised, skip unwanted tests "
+                "rather than overriding"
+            )
+        kwargs.setdefault("name", f"systemd-tests-{time.time():.2f}")
         # Log container info.
         image_repr = image.repo_tags[0] if image.repo_tags else image.id[:8]
         all_args_repr = (
             *(str(x) for x in args),
             *(f"{k}={v}" for k, v in kwargs.items()),
         )
-        logger.info(
+        logger.debug(
             "Running container image %s with args: %s",
             image_repr,
             ", ".join(all_args_repr),
@@ -166,7 +333,9 @@ def ctr_ctx(
                         else:
                             break
                 finally:
-                    if error_occurred or log_boot_output:
+                    if error_occurred:
+                        logger.error("Container boot logs:\n%s", ctr.logs())
+                    elif log_boot_output:
                         logger.debug("Container boot logs:\n%s", ctr.logs())
             yield ctr
         finally:
@@ -174,33 +343,3 @@ def ctr_ctx(
                 ctr.remove(force=True)
 
     return ctr_ctx_mgr
-
-
-@pytest.fixture(params=["host", "private"])
-def cgroupns_param(request: FixtureRequest) -> str:
-    """Parameterise on cgroupns (host and private)."""
-    return request.param
-
-
-@pytest.fixture
-def default_ctr_kwargs(
-    ctr_client: CtrClient,
-    cgroupns_param: str,
-    cgroup_mode: str,
-) -> Mapping[str, Any]:
-    """
-    Default arguments for running a systemd container.
-
-    Automatically parameterises on cgroupns (host and private) and cgroup v1
-    mode (legacy and hybrid) if applicable.
-    """
-    kwargs = dict(
-        cgroupns=cgroupns_param,
-        legacy_cgroup_mode=(cgroup_mode == "legacy"),
-    )
-    if ctr_client.mgr is CtrMgr.PODMAN:
-        kwargs["systemd"] = "always"
-        kwargs["cap_add"] = ["sys_admin"]
-    else:
-        kwargs["privileged"] = True
-    return kwargs

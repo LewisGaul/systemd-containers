@@ -1,19 +1,29 @@
+from __future__ import annotations
+
 import logging
 import time
-from typing import Any, Callable, ContextManager, Mapping
+from typing import Any, Mapping
 
-from python_on_whales import Container
+import pytest
 from python_on_whales import DockerException as CtrException
+from python_on_whales import Image as CtrImage
 
-from ... import utils
-from ...utils import CtrInitError
-
+from .. import utils
+from ..utils import CtrInitError
+from . import CtrCtxType
 
 logger = logging.getLogger(__name__)
 
 
+@pytest.fixture(scope="module")
+def delayed_start_cmd(pkg_image: CtrImage) -> list[str]:
+    assert len(pkg_image.config.entrypoint) == 1
+    orig_entrypoint = pkg_image.config.entrypoint[0]
+    return ["bash", "-c", f"sleep 1 && exec {orig_entrypoint}"]
+
+
 def test_late_exec_proc(
-    ctr_ctx: Callable[..., ContextManager[Container]],
+    ctr_ctx: CtrCtxType,
     default_ctr_kwargs: Mapping[str, Any],
     cgroup_version: int,
 ):
@@ -26,13 +36,14 @@ def test_late_exec_proc(
 
 
 def test_early_exec_proc(
-    ctr_ctx: Callable[..., ContextManager[Container]],
+    ctr_ctx: CtrCtxType,
     default_ctr_kwargs: Mapping[str, Any],
+    delayed_start_cmd: list[str],
     cgroup_version: int,
 ):
     with ctr_ctx(
-        entrypoint="bash",
-        command=["-c", "sleep 1 && exec /sbin/init"],
+        entrypoint="",
+        command=delayed_start_cmd,
         **default_ctr_kwargs,
         wait=False,
     ) as ctr:
@@ -55,13 +66,14 @@ def test_early_exec_proc(
 
 
 def test_exec_proc_spam(
-    ctr_ctx: Callable[..., ContextManager[Container]],
+    ctr_ctx: CtrCtxType,
     default_ctr_kwargs: Mapping[str, Any],
+    delayed_start_cmd: list[str],
     cgroup_version: int,
 ):
     with ctr_ctx(
-        entrypoint="bash",
-        command=["-c", "sleep 1 && exec /sbin/init"],
+        entrypoint="",
+        command=delayed_start_cmd,
         **default_ctr_kwargs,
         wait=False,
     ) as ctr:

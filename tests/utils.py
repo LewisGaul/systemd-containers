@@ -25,7 +25,6 @@ from python_on_whales import DockerClient as POWCtrClient
 from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
 
-
 logger = logging.getLogger(__name__)
 
 
