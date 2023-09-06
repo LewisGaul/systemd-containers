@@ -91,7 +91,7 @@ def cgroup_version(pytestconfig: pytest.Config) -> int:
 def host_check(ctr_client: CtrClient) -> None:
     """Check and log properties of the container host."""
     logger.info(
-        "Running container using %s, see debug logs for detailed info",
+        "Using container manager %s, see debug logs for detailed info",
         ctr_client.mgr,
     )
     utils.run_cmd([ctr_client.exe, "info"], log_output=True)

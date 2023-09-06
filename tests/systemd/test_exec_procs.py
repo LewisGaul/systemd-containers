@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import functools
 import logging
 import time
-from typing import Any, Mapping
+from typing import Any
 
 import pytest
 from python_on_whales import DockerException as CtrException
@@ -15,16 +16,20 @@ from . import CtrCtxType
 logger = logging.getLogger(__name__)
 
 
-@pytest.fixture(scope="module")
-def delayed_start_cmd(pkg_image: CtrImage) -> list[str]:
+@pytest.fixture
+def delayed_start_ctr_ctx(ctr_ctx: CtrCtxType, pkg_image: CtrImage) -> CtrCtxType:
     assert len(pkg_image.config.entrypoint) == 1
     orig_entrypoint = pkg_image.config.entrypoint[0]
-    return ["bash", "-c", f"sleep 1 && exec {orig_entrypoint}"]
+    return functools.partial(
+        ctr_ctx,
+        entrypoint="",
+        command=["bash", "-c", f"sleep 1 && exec {orig_entrypoint}"],
+    )
 
 
 def test_late_exec_proc(
     ctr_ctx: CtrCtxType,
-    default_ctr_kwargs: Mapping[str, Any],
+    default_ctr_kwargs: dict[str, Any],
     cgroup_version: int,
 ):
     with ctr_ctx(**default_ctr_kwargs) as ctr:
@@ -36,17 +41,11 @@ def test_late_exec_proc(
 
 
 def test_early_exec_proc(
-    ctr_ctx: CtrCtxType,
-    default_ctr_kwargs: Mapping[str, Any],
-    delayed_start_cmd: list[str],
+    delayed_start_ctr_ctx: CtrCtxType,
+    default_ctr_kwargs: dict[str, Any],
     cgroup_version: int,
 ):
-    with ctr_ctx(
-        entrypoint="",
-        command=delayed_start_cmd,
-        **default_ctr_kwargs,
-        wait=False,
-    ) as ctr:
+    with delayed_start_ctr_ctx(**default_ctr_kwargs, wait=False) as ctr:
         ctr.execute(["sleep", "inf"], detach=True)
         exec_proc_ctr_pid = max(int(p) for p in ctr.execute(["pidof", "sleep"]).split())
         output = ctr.execute(["cat", f"/proc/{exec_proc_ctr_pid}/cgroup"])
@@ -66,17 +65,11 @@ def test_early_exec_proc(
 
 
 def test_exec_proc_spam(
-    ctr_ctx: CtrCtxType,
-    default_ctr_kwargs: Mapping[str, Any],
-    delayed_start_cmd: list[str],
+    delayed_start_ctr_ctx: CtrCtxType,
+    default_ctr_kwargs: dict[str, Any],
     cgroup_version: int,
 ):
-    with ctr_ctx(
-        entrypoint="",
-        command=delayed_start_cmd,
-        **default_ctr_kwargs,
-        wait=False,
-    ) as ctr:
+    with delayed_start_ctr_ctx(**default_ctr_kwargs, wait=False) as ctr:
         # Spam creating sleeping exec processes for 2 seconds - 1 second before
         # systemd starts and 1 second while it starts up.
         end_time = time.time() + 2

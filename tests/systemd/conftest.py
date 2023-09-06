@@ -197,7 +197,7 @@ def cgroup_mode(request: FixtureRequest) -> str:
 
 
 @pytest.fixture
-def default_ctr_kwargs(ctr_mgr: CtrMgr) -> Mapping[str, Any]:
+def default_ctr_kwargs(ctr_mgr: CtrMgr) -> dict[str, Any]:
     """
     Default arguments for running a systemd container, accommodating both
     Docker and Podman.
@@ -289,6 +289,7 @@ def ctr_ctx(
                 "SYSTEMD_PROC_CMDLINE"
             ] = "systemd.legacy_systemd_cgroup_controller=1"
         kwargs.setdefault("tty", True)
+        kwargs.setdefault("interactive", True)
         if not kwargs.setdefault("detach", True):
             raise TypeError("Running container attached is not supported")
         if kwargs.setdefault("remove", False):
