@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import textwrap
 import time
 from pathlib import Path
 from typing import Any, Generator, Mapping, Optional
 
 import pytest
-from pytest import Config, FixtureRequest, Item
+from pytest import Config, FixtureRequest, Item, Metafunc
 from python_on_whales import Container
 from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
@@ -36,6 +37,19 @@ def pytest_configure(config: Config) -> None:
     config.addinivalue_line(
         "markers",
         f'ctr_mgr(MGR, reason="..."): Container manager required by the test',
+    )
+
+
+def pytest_generate_tests(metafunc: Metafunc) -> None:
+    setup_mode_dirs = [
+        os.path.basename(p) for p in os.listdir(SYSTEMD_TEST_DIR / "setup_modes")
+    ]
+    metafunc.parametrize(
+        "setup_mode",
+        [None] + setup_mode_dirs,
+        ids=["default"] + setup_mode_dirs,
+        scope="package",
+        indirect=True,
     )
 
 
@@ -108,19 +122,13 @@ def systemd_image(ctr_client: CtrClient) -> CtrImage:
     yield image
 
 
-@pytest.fixture(
-    scope="package",
-    params=[None, "unmount", "inner_cgroup"],
-    ids=["default", "unmount", "inner_cgroup"],
-)
+@pytest.fixture(scope="package")
 def setup_mode(request: FixtureRequest) -> None:
     """
     The container setup mode, parameterising all tests at a package level.
     """
-    logger.info("Running tests in setup mode: %s", request.param)
     if request.param is not None:
         # Check the directory for the setup mode exists.
-        # TODO: Automatically find setup modes from dirs that exist.
         setup_mode_dir = SYSTEMD_TEST_DIR / "setup_modes" / request.param
         assert setup_mode_dir.is_dir()
         assert (setup_mode_dir / "init_script.sh").is_file()
@@ -185,10 +193,6 @@ def cgroupns(request: FixtureRequest) -> str:
 @pytest.fixture(params=["legacy", "hybrid", "unified"])
 def cgroup_mode(request: FixtureRequest) -> str:
     """Parameterise on systemd cgroup mode."""
-    if request.config.option.cgroup_version == 1 and request.param == "unified":
-        pytest.skip("Host uses cgroups v1")
-    elif request.config.option.cgroup_version == 2 and request.param != "unified":
-        pytest.skip("Host uses cgroups v2")
     return request.param
 
 
@@ -201,9 +205,11 @@ def default_ctr_kwargs(ctr_mgr: CtrMgr) -> Mapping[str, Any]:
     kwargs = {}
     if ctr_mgr is CtrMgr.PODMAN:
         kwargs["cap_add"] = ["sys_admin"]
-        # This is only needed for the case we're using a custom entrypoint, and
-        # could be avoided if we were to package that entrypoint to a path that
-        # Podman recognises as a systemd entrypoint, such as /usr/sbin/init.
+        # This only needs to be "always" rather than True (the Podman default)
+        # for the case we're using a custom entrypoint, and True could be used
+        # if we were to package that entrypoint to a path that Podman recognises
+        # as a systemd entrypoint, such as /usr/sbin/init. Might as well just
+        # use "always" here to be explicit anyway.
         kwargs["systemd"] = "always"
     else:
         kwargs["privileged"] = True
