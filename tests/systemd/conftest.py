@@ -73,6 +73,9 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
             valid_conditions["cgroupv2 unified"] = (
                 test_params["cgroup_mode"] == "unified"
             )
+            valid_conditions["cgroupv2 no minimal"] = (
+                test_params["setup_mode"] != "minimal"
+            )
         for param in ["setup_mode", "cgroupns", "cgroup_mode"]:
             marker = item.get_closest_marker(param)
             if marker:
@@ -84,10 +87,10 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
     items[:] = [x for x in items if x not in remove]
 
     # Mark tests that cannot be executed to be skipped.
-    for items in items:
+    for item in items:
         if ctr_mgr_marker := item.get_closest_marker("ctr_mgr"):
             required_ctr_mgr = ctr_mgr_marker.args[0]
-            skip_reason = ctr_mgr_marker.kwargs.get("reason")
+            skip_reason = ctr_mgr_marker.kwargs.get("reason", "")
             if config.option.ctr_client.mgr is not required_ctr_mgr:
                 item.add_marker(pytest.mark.skip(skip_reason))
 
@@ -215,13 +218,15 @@ def default_ctr_kwargs(ctr_mgr: CtrMgr, setup_mode: Optional[str]) -> dict[str, 
         # just use "always" here to be explicit about the intent.
         kwargs["systemd"] = "always"
     else:
+        # Systemd expects /run to be a tmpfs.
+        kwargs["tmpfs"] = ["/run"]
         # Docker does not set the 'container' env var, which systemd
         # uses to determine it should run in container mode.
-        kwargs.setdefault("envs", {}).setdefault("container", "docker")
+        kwargs["envs"] = {"container": "docker"}
 
     # Privileged mode is required when running with Docker, unless certain
     # custom setup is performed. Otherwise, CAP_SYS_ADMIN is sufficient.
-    if ctr_mgr is CtrMgr.DOCKER and setup_mode not in ["remount", "unmount"]:
+    if ctr_mgr is CtrMgr.DOCKER and setup_mode not in ["minimal", "remount", "unmount"]:
         kwargs["privileged"] = True
     else:
         kwargs["cap_add"] = ["sys_admin"]
@@ -234,6 +239,7 @@ def ctr_ctx(
     request: pytest.FixtureRequest,
     ctr_client: CtrClient,
     pkg_image: CtrImage,
+    setup_mode: Optional[str],
     cgroupns: str,
     cgroup_mode: str,
 ) -> CtrCtxType:
@@ -294,7 +300,8 @@ def ctr_ctx(
             systemd = None
         elif systemd is not None:
             if ctr_client.mgr is CtrMgr.DOCKER:
-                pytest.skip("Systemd mode not supported by Docker")
+                # Skip at a per-testcase level, for explicitness.
+                pytest.fail("Systemd mode not supported by Docker")
             kwargs["systemd"] = systemd
         if cgroup_mode == "legacy":
             # Force systemd to run in legacy cgroup v1 mode.
@@ -357,6 +364,12 @@ def ctr_ctx(
                     if error_occurred:
                         logger.error("Container boot logs:\n%s", ctr.logs())
                     elif log_boot_output:
+                        if setup_mode is not None:
+                            with contextlib.suppress(CtrException):
+                                init_script_logs = ctr.execute(
+                                    ["cat", "/var/log/init_script.log"]
+                                )
+                            logger.debug("Init script logs:\n%s", init_script_logs)
                         logger.debug("Container boot logs:\n%s", ctr.logs())
             yield ctr
         finally:

@@ -1,16 +1,20 @@
+from __future__ import annotations
+
 import logging
 import re
 
 import pytest
 
 from .. import utils
-from ..utils import CtrMgr
+from ..utils import CtrInitError, CtrMgr
 from . import CtrCtxType
 
 logger = logging.getLogger(__name__)
 
 
-def _check_ctr_boot_logs(ctr_logs: str) -> list[str]:
+def _check_ctr_boot_logs(
+    ctr_logs: str, *, expect_login_prompt: bool = False
+) -> list[str]:
     """
     Check for unexpected warnings/messages in the container's boot logs.
 
@@ -18,6 +22,8 @@ def _check_ctr_boot_logs(ctr_logs: str) -> list[str]:
         The systemd container logs to check.
     :return:
         A list of unexpected boot log lines.
+    :raise CtrInitError:
+        If the logs unexpectedly do not include the login prompt section.
     """
     # Split the boot logs into sections:
     #  1. First systemd output 'systemd <version> ...'
@@ -67,6 +73,12 @@ def _check_ctr_boot_logs(ctr_logs: str) -> list[str]:
         if not any(re.fullmatch(rgx, line) for rgx in allowed_line_regexes):
             unexpected_lines.append(coloured_line)
 
+    if expect_login_prompt and not reached_login_prompt:
+        msg = "Login prompt not found in boot logs"
+        if unexpected_lines:
+            msg += " - unexpected lines:\n" + "\n".join(unexpected_lines)
+        raise CtrInitError(msg)
+
     return unexpected_lines
 
 
@@ -89,6 +101,7 @@ def test_privileged(ctr_ctx: CtrCtxType, ctr_mgr: CtrMgr):
         envs["container"] = "docker"
     with ctr_ctx(
         privileged=True,
+        tmpfs=["/run"],
         envs=envs,
         log_boot_output=True,
     ) as ctr:
@@ -107,6 +120,7 @@ def test_non_priv(ctr_ctx: CtrCtxType, ctr_mgr: CtrMgr):
     with ctr_ctx(
         cap_add=["sys_admin"],
         systemd=False,
+        tmpfs=["/run"],
         envs=envs,
         log_boot_output=True,
     ) as ctr:
@@ -154,7 +168,7 @@ def test_non_priv_with_host_cgroup_passthrough(
         _warn_unexpected_boot_logs(ctr.logs())
 
 
-@pytest.mark.ctr_mgr(CtrMgr.PODMAN)
+@pytest.mark.ctr_mgr(CtrMgr.PODMAN, reason="Systemd mode not supported by Docker")
 def test_non_priv_systemd_mode(ctr_ctx: CtrCtxType):
     """
     Test running with Podman's systemd mode, which automatically sets up the
@@ -168,7 +182,7 @@ def test_non_priv_systemd_mode(ctr_ctx: CtrCtxType):
         _warn_unexpected_boot_logs(ctr.logs())
 
 
-@pytest.mark.ctr_mgr(CtrMgr.PODMAN)
+@pytest.mark.ctr_mgr(CtrMgr.PODMAN, reason="Systemd mode not supported by Docker")
 def test_privileged_systemd_mode(ctr_ctx: CtrCtxType):
     """Test running the container in privileged with Podman's systemd mode."""
     with ctr_ctx(
