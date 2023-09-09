@@ -9,12 +9,21 @@ from . import CtrCtxType
 logger = logging.getLogger(__name__)
 
 
+def test_cgroup_dir(
+    ctr_ctx: CtrCtxType,
+    default_ctr_kwargs: dict[str, Any],
+):
+    with ctr_ctx(**default_ctr_kwargs) as ctr:
+        output = ctr.execute(["ls", "-Al", "/sys/fs/cgroup/"])
+        logger.debug("Contents of /sys/fs/cgroup/:\n%s", output)
+
+
 def test_cgroup_mounts(
     ctr_ctx: CtrCtxType,
     default_ctr_kwargs: dict[str, Any],
 ):
     with ctr_ctx(**default_ctr_kwargs) as ctr:
-        output = ctr.execute(["findmnt", "-R", "/sys/fs/cgroup"])
+        output = ctr.execute(["findmnt", "-R", "/sys/fs/cgroup", "--notruncate"])
         logger.debug("Cgroup mounts:\n%s", output)
 
 

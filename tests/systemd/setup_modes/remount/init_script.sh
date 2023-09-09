@@ -25,7 +25,7 @@ function fixup_cgroup_v1_mount() {
     # We could check these conditions, but it's simpler just to recreate the
     # mounts unconditionally.
 
-    # Unmount if read-only or bind mount, so we can mount as read-write.
+    # Unmount in case read-only or bind mount, so we can mount as read-write.
     opts=$(findmnt "$mnt_path" -o OPTIONS | tail -n 1 | sed 's/^ro/rw/')
     log "Remounting $mnt_path with opts $opts"
     umount -R "$mnt_path" || exit_code=$?
@@ -57,8 +57,7 @@ if [[ $cgroup_mount_type == tmpfs ]]; then
         if findmnt -t cgroup "$subsys_path" > /dev/null; then
             fixup_cgroup_v1_mount "$subsys_path" cgroup
         elif findmnt -t cgroup2 "$subsys_path" > /dev/null; then
-            log "Remounting $subsys_path mount as read-write"
-            mount "$subsys_path" -o remount,rw
+            fixup_cgroup_v1_mount "$subsys_path" cgroup2
         fi
     done
 elif [[ $cgroup_mount_type == cgroup2fs ]]; then

@@ -76,6 +76,8 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
             valid_conditions["cgroupv2 no minimal"] = (
                 test_params["setup_mode"] != "minimal"
             )
+        if test_params["setup_mode"] == "rebind":
+            valid_conditions["rebind cgroupns=host"] = test_params["cgroupns"] == "host"
         for param in ["setup_mode", "cgroupns", "cgroup_mode"]:
             marker = item.get_closest_marker(param)
             if marker:
@@ -226,7 +228,12 @@ def default_ctr_kwargs(ctr_mgr: CtrMgr, setup_mode: Optional[str]) -> dict[str, 
 
     # Privileged mode is required when running with Docker, unless certain
     # custom setup is performed. Otherwise, CAP_SYS_ADMIN is sufficient.
-    if ctr_mgr is CtrMgr.DOCKER and setup_mode not in ["minimal", "remount", "unmount"]:
+    if ctr_mgr is CtrMgr.DOCKER and setup_mode not in [
+        "minimal",
+        "remount",
+        "unmount",
+        "rebind",
+    ]:
         kwargs["privileged"] = True
     else:
         kwargs["cap_add"] = ["sys_admin"]
