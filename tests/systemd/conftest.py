@@ -76,8 +76,10 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
             valid_conditions["cgroupv2 no minimal"] = (
                 test_params["setup_mode"] != "minimal"
             )
-        if test_params["setup_mode"] == "rebind":
-            valid_conditions["rebind cgroupns=host"] = test_params["cgroupns"] == "host"
+        if test_params["cgroupns"] == "private":
+            valid_conditions["private cgroupns setup_mode"] = test_params[
+                "setup_mode"
+            ] not in ["rebind", "cgroupns"]
         for param in ["setup_mode", "cgroupns", "cgroup_mode"]:
             marker = item.get_closest_marker(param)
             if marker:
