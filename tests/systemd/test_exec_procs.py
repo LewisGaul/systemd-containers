@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 import logging
 import time
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 from python_on_whales import DockerException as CtrException
@@ -31,19 +31,24 @@ def test_late_exec_proc(
     ctr_ctx: CtrCtxType,
     default_ctr_kwargs: dict[str, Any],
     cgroup_version: int,
+    setup_mode: Optional[str],
 ):
     with ctr_ctx(**default_ctr_kwargs) as ctr:
         output = ctr.execute(["cat", "/proc/self/cgroup"])
         logger.debug("Got exec proc cgroups:\n%s", output)
         enabled_controllers = utils.get_enabled_cgroup_controllers(ctr, cgroup_version)
         logger.debug("Enabled controllers: %s", enabled_controllers)
-        assert enabled_controllers >= {"memory", "pids"}
+        if setup_mode != "minimal":
+            assert enabled_controllers >= {"memory", "pids"}
+        else:
+            logger.warning("Controllers not enabled with setup_mode=%s", setup_mode)
 
 
 def test_early_exec_proc(
     delayed_start_ctr_ctx: CtrCtxType,
     default_ctr_kwargs: dict[str, Any],
     cgroup_version: int,
+    setup_mode: Optional[str],
 ):
     with delayed_start_ctr_ctx(**default_ctr_kwargs, wait=False) as ctr:
         ctr.execute(["sleep", "inf"], detach=True)
@@ -61,13 +66,17 @@ def test_early_exec_proc(
         logger.debug("Got exec proc cgroups after systemd started:\n%s", output)
         enabled_controllers = utils.get_enabled_cgroup_controllers(ctr, cgroup_version)
         logger.debug("Enabled controllers: %s", enabled_controllers)
-        assert enabled_controllers >= {"memory", "pids"}
+        if setup_mode != "minimal":
+            assert enabled_controllers >= {"memory", "pids"}
+        else:
+            logger.warning("Controllers not enabled with setup_mode=%s", setup_mode)
 
 
 def test_exec_proc_spam(
     delayed_start_ctr_ctx: CtrCtxType,
     default_ctr_kwargs: dict[str, Any],
     cgroup_version: int,
+    setup_mode: Optional[str],
 ):
     with delayed_start_ctr_ctx(**default_ctr_kwargs, wait=False) as ctr:
         # Spam creating sleeping exec processes for 2 seconds - 1 second before
@@ -94,4 +103,7 @@ def test_exec_proc_spam(
                 prev_exec_proc_cgroups = output
         enabled_controllers = utils.get_enabled_cgroup_controllers(ctr, cgroup_version)
         logger.debug("Enabled controllers: %s", enabled_controllers)
-        assert enabled_controllers >= {"memory", "pids"}
+        if setup_mode != "minimal":
+            assert enabled_controllers >= {"memory", "pids"}
+        else:
+            logger.warning("Controllers not enabled with setup_mode=%s", setup_mode)

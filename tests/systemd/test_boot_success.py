@@ -7,7 +7,8 @@ import pytest
 
 from .. import utils
 from ..utils import CtrInitError, CtrMgr
-from . import CtrCtxType
+from . import CUSTOM_SETUP_MODES, CtrCtxType
+
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ def test_privileged(ctr_ctx: CtrCtxType, ctr_mgr: CtrMgr):
         _warn_unexpected_boot_logs(ctr.logs())
 
 
-@pytest.mark.setup_mode(["remount", "unmount"])
+@pytest.mark.setup_mode(set(CUSTOM_SETUP_MODES) - {"inner_cgroup"})
 def test_non_priv(ctr_ctx: CtrCtxType, ctr_mgr: CtrMgr):
     """Test running in non-privileged mode, requiring custom setup."""
     envs = {}

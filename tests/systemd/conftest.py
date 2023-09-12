@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import textwrap
 import time
 from pathlib import Path
@@ -16,7 +15,8 @@ from python_on_whales import Image as CtrImage
 
 from .. import utils
 from ..utils import CtrClient, CtrInitError, CtrMgr, Mount
-from . import SYSTEMD_TEST_DIR, CtrCtxType
+from . import ALL_SETUP_MODES, CUSTOM_SETUP_MODES, SYSTEMD_TEST_DIR, CtrCtxType
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +41,10 @@ def pytest_configure(config: Config) -> None:
 
 
 def pytest_generate_tests(metafunc: Metafunc) -> None:
-    setup_mode_dirs = [
-        os.path.basename(p) for p in os.listdir(SYSTEMD_TEST_DIR / "setup_modes")
-    ]
     metafunc.parametrize(
         "setup_mode",
-        [None] + setup_mode_dirs,
-        ids=["default"] + setup_mode_dirs,
+        ALL_SETUP_MODES,
+        ids=["default"] + CUSTOM_SETUP_MODES,
         scope="package",
         indirect=True,
     )
@@ -230,12 +227,7 @@ def default_ctr_kwargs(ctr_mgr: CtrMgr, setup_mode: Optional[str]) -> dict[str, 
 
     # Privileged mode is required when running with Docker, unless certain
     # custom setup is performed. Otherwise, CAP_SYS_ADMIN is sufficient.
-    if ctr_mgr is CtrMgr.DOCKER and setup_mode not in [
-        "minimal",
-        "remount",
-        "unmount",
-        "rebind",
-    ]:
+    if ctr_mgr is CtrMgr.DOCKER and setup_mode in [None, "inner_cgroup"]:
         kwargs["privileged"] = True
     else:
         kwargs["cap_add"] = ["sys_admin"]

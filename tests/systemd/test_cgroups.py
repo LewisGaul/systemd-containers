@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from .. import utils
 from . import CtrCtxType
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,12 @@ def test_cgroup_controllers(
     ctr_ctx: CtrCtxType,
     default_ctr_kwargs: dict[str, Any],
     cgroup_version: int,
+    setup_mode: Optional[str],
 ):
     with ctr_ctx(**default_ctr_kwargs) as ctr:
         enabled_controllers = utils.get_enabled_cgroup_controllers(ctr, cgroup_version)
         logger.debug("Enabled controllers: %s", enabled_controllers)
+        if setup_mode != "minimal":
+            assert enabled_controllers >= {"memory", "pids"}
+        else:
+            logger.warning("Controllers not enabled with setup_mode=%s", setup_mode)
