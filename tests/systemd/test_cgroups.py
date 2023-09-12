@@ -22,10 +22,16 @@ def test_cgroup_dir(
 def test_cgroup_mounts(
     ctr_ctx: CtrCtxType,
     default_ctr_kwargs: dict[str, Any],
+    cgroup_version: int,
 ):
     with ctr_ctx(**default_ctr_kwargs) as ctr:
         output = ctr.execute(["findmnt", "-R", "/sys/fs/cgroup", "--notruncate"])
         logger.debug("Cgroup mounts:\n%s", output)
+        cgroup_mount_type = ctr.execute(["stat", "-f", "/sys/fs/cgroup/", "-c", "%T"])
+        if cgroup_version == 1:
+            assert cgroup_mount_type == "tmpfs"
+        else:
+            assert cgroup_mount_type == "cgroup2fs"
 
 
 def test_cgroup_paths(

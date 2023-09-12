@@ -75,6 +75,8 @@ else
         exit 1
     fi
     # Recreate cgroup mount so that systemd knows which cgroup version to use.
+    # Can alternatively use:
+    #  SYSTEMD_PROC_CMDLINE="systemd.unified_cgroup_hierarchy=1"
     if [[ $CGROUP_VERSION == 1 ]]; then
         log "Recreating cgroup v1 tmpfs mount"
         mount -t tmpfs tmpfs /sys/fs/cgroup

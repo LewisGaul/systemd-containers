@@ -25,6 +25,7 @@ elif [[ $cgroup_mount_type == cgroup2fs ]]; then
     log "Detected cgroups v2"
     log "Unmounting /sys/fs/cgroup mount (allow systemd to recreate)"
     umount /sys/fs/cgroup
+    export SYSTEMD_PROC_CMDLINE="systemd.unified_cgroup_hierarchy=1"
 else
     log_stderr "ERROR: Unable to detect cgroup version using /sys/fs/cgroup mount"
     exit 1

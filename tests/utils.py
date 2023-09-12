@@ -244,7 +244,7 @@ def get_enabled_cgroup_controllers(ctr: Container, cgroup_version: int) -> set[s
     else:
         assert cgroup_version == 2
         pid_1_cgroup_relpath = (
-            ctr.execute(["cat", "/proc/1/cgroup"]).split(":")[2].lstrip("/")
+            ctr.execute(["grep", "0::", "/proc/1/cgroup"]).split(":")[2].lstrip("/")
         )
         # Workaround for the pseudo-private cgroup bind mounts used in
         # cgroupns=host mode, finding the path that's actually visible inside
