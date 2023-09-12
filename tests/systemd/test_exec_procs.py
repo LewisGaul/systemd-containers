@@ -83,7 +83,16 @@ def test_exec_proc_spam(
         # systemd starts and 1 second while it starts up.
         end_time = time.time() + 2
         while time.time() < end_time:
-            ctr.execute(["sleep", "inf"], detach=True)
+            try:
+                ctr.execute(["sleep", "inf"], detach=True)
+            except CtrException as exc:
+                ctr.reload()
+                if not ctr.state.running:
+                    raise CtrInitError(
+                        "Container exited unexpectedly while spamming with "
+                        "exec processes during initialisation"
+                    ) from exc
+                raise
         # Wait for systemd boot to complete inside the container.
         try:
             ctr.execute(["systemctl", "is-system-running", "--wait"])

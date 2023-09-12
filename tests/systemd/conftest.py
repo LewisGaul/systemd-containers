@@ -374,6 +374,11 @@ def ctr_ctx(
                         logger.debug("Container boot logs:\n%s", ctr.logs())
             yield ctr
         finally:
+            ctr.reload()
+            if not ctr.state.running:
+                logger.error(
+                    "Container exited unexpectedly, console output:\n%s", ctr.logs()
+                )
             with contextlib.suppress(CtrException):
                 ctr.remove(force=True)
 
