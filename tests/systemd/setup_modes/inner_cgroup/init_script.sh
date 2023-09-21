@@ -23,6 +23,9 @@ cgroup_mount_type=$(stat -f /sys/fs/cgroup/ -c %T)
 
 if [[ $cgroup_mount_type == tmpfs ]]; then
     log "Detected cgroups v1"
+    # Note that this approach relies on the pseudo cgroup namespace that gets
+    # set up with bind mounts on cgroupv1 under cgroupns=host, where we assume
+    # /sys/fs/cgroup/<subsys>/ is the container's root cgroup path.
     for subsys in systemd unified memory cpuset; do
         if [[ $subsys == unified && ! -d /sys/fs/cgroup/unified ]]; then
             continue

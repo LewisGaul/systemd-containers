@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Generator, Mapping, Optional
 
 import pytest
-from pytest import Config, FixtureRequest, Item, Metafunc
 from python_on_whales import Container
 from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
@@ -28,7 +27,41 @@ _PARAMETERISATIONS = ["setup_mode", "cgroupns", "cgroup_mode"]
 # -----------------------------------------------------------------------------
 
 
-def pytest_configure(config: Config) -> None:
+def pytest_addoption(parser: pytest.Parser) -> None:
+    def parse_setup_modes(value: str) -> list[Optional[str]]:
+        modes = value.split(",")
+        if "default" in modes:
+            modes[modes.index("default")] = None
+        unexpected_modes = [m for m in modes if m not in ALL_SETUP_MODES]
+        if unexpected_modes:
+            raise ValueError(
+                "Unrecognised setup modes: "
+                + ", ".join(repr(x) for x in unexpected_modes)
+            )
+        return modes
+
+    group = parser.getgroup("systemd-tests")
+
+    group.addoption(
+        "--setup-mode",
+        "--setup-modes",
+        type=parse_setup_modes,
+        help="Comma-separated list of setup modes to use, choices: "
+        + ", ".join(["default"] + CUSTOM_SETUP_MODES),
+    )
+    group.addoption(
+        "--cgroupns",
+        choices=["host", "private"],
+        help="Cgroupns setting to use",
+    )
+    group.addoption(
+        "--cgroup-mode",
+        choices=["legacy", "hybrid", "unified"],
+        help="Systemd cgroup mode to use, must be one of legacy/hybrid on v1, unified on v2",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
     for param in _PARAMETERISATIONS:
         config.addinivalue_line(
             "markers",
@@ -40,7 +73,7 @@ def pytest_configure(config: Config) -> None:
     )
 
 
-def pytest_generate_tests(metafunc: Metafunc) -> None:
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     metafunc.parametrize(
         "setup_mode",
         ALL_SETUP_MODES,
@@ -50,12 +83,14 @@ def pytest_generate_tests(metafunc: Metafunc) -> None:
     )
 
 
-def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
     cgroup_version: int = config.option.cgroup_version
 
     # Find paramaterisations that don't make sense and remove them from
     # the list of tests to be run.
-    remove = []
+    remove_not_applicable = []
     for item in items:
         if not isinstance(item, pytest.Function):
             # Not sure when this would be the case?
@@ -82,10 +117,36 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
             if marker:
                 valid_conditions[param] = test_params[param] in marker.args[0]
         if not all(valid_conditions.values()):
-            remove.append(item)
+            remove_not_applicable.append(item)
 
-    logger.debug("Removing %u test parameterisations that don't apply", len(remove))
-    items[:] = [x for x in items if x not in remove]
+    logger.debug(
+        "Removing %u test parameterisations that don't apply",
+        len(remove_not_applicable),
+    )
+    items[:] = [x for x in items if x not in remove_not_applicable]
+
+    # Find paramaterisations that should be removed based on CLI arguments.
+    remove_due_to_cli_args = []
+    req_setup_modes = config.getoption("--setup-modes") or ALL_SETUP_MODES
+    req_cgroupns = config.getoption("--cgroupns")
+    req_cgroup_mode = config.getoption("--cgroup-mode")
+    for item in items:
+        if not isinstance(item, pytest.Function):
+            # Not sure when this would be the case?
+            continue
+        test_params: Mapping[str, Any] = item.callspec.params
+        if test_params["setup_mode"] not in req_setup_modes:
+            remove_due_to_cli_args.append(item)
+        elif req_cgroupns and test_params["cgroupns"] != req_cgroupns:
+            remove_due_to_cli_args.append(item)
+        elif req_cgroup_mode and test_params["cgroup_mode"] != req_cgroup_mode:
+            remove_due_to_cli_args.append(item)
+
+    logger.debug(
+        "Removing %u test parameterisations due to CLI args",
+        len(remove_due_to_cli_args),
+    )
+    items[:] = [x for x in items if x not in remove_due_to_cli_args]
 
     # Mark tests that cannot be executed to be skipped.
     for item in items:
@@ -127,7 +188,7 @@ def systemd_image(ctr_client: CtrClient) -> CtrImage:
 
 
 @pytest.fixture(scope="package")
-def setup_mode(request: FixtureRequest) -> None:
+def setup_mode(request: pytest.FixtureRequest) -> None:
     """
     The container setup mode, parameterising all tests at a package level.
     """
@@ -142,7 +203,7 @@ def setup_mode(request: FixtureRequest) -> None:
 @pytest.fixture(scope="package")
 def pkg_image(
     ctr_client: CtrClient,
-    systemd_image: CtrClient,
+    systemd_image: CtrImage,
     setup_mode: Optional[str],
 ) -> CtrImage:
     """The image to use for the parameterised setup mode."""
@@ -189,13 +250,13 @@ def host_check_systemd(
 
 
 @pytest.fixture(params=["host", "private"])
-def cgroupns(request: FixtureRequest) -> str:
+def cgroupns(request: pytest.FixtureRequest) -> str:
     """Parameterise on cgroupns (host and private)."""
     return request.param
 
 
 @pytest.fixture(params=["legacy", "hybrid", "unified"])
-def cgroup_mode(request: FixtureRequest) -> str:
+def cgroup_mode(request: pytest.FixtureRequest) -> str:
     """Parameterise on systemd cgroup mode."""
     return request.param
 
