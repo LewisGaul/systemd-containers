@@ -5,8 +5,8 @@ import re
 
 import pytest
 
-from .. import utils
-from ..utils import CtrInitError, CtrMgr
+from . import utils
+from .utils import CtrInitError, CtrMgr
 from . import CUSTOM_SETUP_MODES, CtrCtxType
 
 

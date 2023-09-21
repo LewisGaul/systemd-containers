@@ -9,8 +9,8 @@ import pytest
 from python_on_whales import DockerException as CtrException
 from python_on_whales import Image as CtrImage
 
-from .. import utils
-from ..utils import CtrInitError
+from . import utils
+from .utils import CtrInitError
 from . import CtrCtxType
 
 logger = logging.getLogger(__name__)
