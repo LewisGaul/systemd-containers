@@ -159,7 +159,7 @@ def pytest_collection_modifyitems(
         if test_params["cgroupns"] == "private":
             valid_conditions["private cgroupns setup_mode"] = test_params[
                 "setup_mode"
-            ] not in ["rebind", "cgroupns"]
+            ] not in ["rebind", "cgroupns", "cgroupns_simple"]
         for param in ["setup_mode", "cgroupns", "cgroup_mode"]:
             marker = item.get_closest_marker(param)
             if marker:
@@ -304,6 +304,7 @@ def pkg_image(
 
 @pytest.fixture(scope="package", autouse=True)
 def host_check_systemd(
+    pytestconfig: pytest.Config,
     cgroup_version: int,
     ctr_client: CtrClient,
     setup_mode: Optional[str],
@@ -311,6 +312,9 @@ def host_check_systemd(
     """
     Check properties of the container host for running systemd containers.
     """
+    if pytestconfig.getoption("--container-host"):
+        logger.warning("Unable to check mounts on remote host")
+        return
     # Check /sys/fs/cgroup/systemd exists if host is on cgroups v1.
     if cgroup_version == 1:
         mounts = [

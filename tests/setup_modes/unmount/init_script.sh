@@ -2,10 +2,11 @@
 
 set -e
 
+LOG_FILE=/var/log/init_script.log
 
 function log() {
     local msg=$1
-    echo "$(date +"%Y-%m-%d %H:%M:%S,%03N"): $msg" >> /var/log/init_script.log
+    echo "$(date +"%Y-%m-%d %H:%M:%S,%03N"): $msg" >> "$LOG_FILE"
 }
 
 function log_stderr() {
@@ -13,6 +14,9 @@ function log_stderr() {
     echo "$msg" >&2
     log "$msg"
 }
+
+# Output logs if this script fails.
+trap 'echo "$0 logs:" >&2; cat $LOG_FILE >&2' ERR EXIT
 
 
 cgroup_mount_type=$(stat -f /sys/fs/cgroup/ -c %T)

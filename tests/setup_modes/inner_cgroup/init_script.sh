@@ -16,7 +16,7 @@ function log_stderr() {
 }
 
 # Output logs if this script fails.
-trap 'echo "$0 logs:" >&2; cat $LOG_FILE >&2' ERR
+trap 'echo "$0 logs:" >&2; cat $LOG_FILE >&2' ERR EXIT
 
 
 cgroup_mount_type=$(stat -f /sys/fs/cgroup/ -c %T)
@@ -54,9 +54,6 @@ else
     log_stderr "ERROR: Unable to detect cgroup version using /sys/fs/cgroup mount"
     exit 1
 fi
-
-# Remove the trap.
-trap '' ERR
 
 # Start systemd.
 exec /sbin/init
